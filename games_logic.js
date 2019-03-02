@@ -2,8 +2,8 @@ var width = 800;
 var height = 400;
 
 // creating game canvas for rendering th egame UI
-var gar = new Phasor.Game(
-    width, height, Phaser.CANVAS, 'phasor-game', {
+var game = new Phaser.Game(
+    width, height, Phaser.CANVAS, 'phaser-game', {
         preload: preload,
         create: create,
         update: update,
@@ -19,7 +19,7 @@ function preload() {
     game.load.image('player', 'assets/sprites/player.png', 32, 48);
 
     game.load.image('ufo', 'assets/game/ufo.png');
-    game.load.image('bullet', 'assets/sprotes/purple_ball.png');
+    game.load.image('bullet', 'assets/sprites/purple_ball.png');
 
     game.load.image('menu', 'assets/game/menu.png');
 
@@ -36,12 +36,23 @@ var bullet;
 var bullet_fired = false;
 var ufo;
 
+var jumpButton;
+
+var menu;
+
 var bullet_speed;
 var bullet_displacement;
 var stay_on_air;
 var stay_on_floor;
 
+// NN
+var nn_network;
+var nn_trainer;
+var nn_output;
+var trainingData = []
+
 var auto_mode = false;
+var training_complete = [];
 
 // sound 
 var soundGaveOver;
@@ -50,21 +61,21 @@ var soundJump;
 
 function create() {
     // setting game object propery
-    game.physics.startSystem(Phasor.Physics.ARCADE); //reason for object to fall rather than float
-    game.physics.arcade.garavity.y = 800;
+    game.physics.startSystem(Phaser.Physics.ARCADE); //reason for object to fall rather than float
+    game.physics.arcade.gravity.y = 800;
     game.time.desiredFps = 30; // seting game fps
 
     // Adding game ogjects
-    bg = game.add.tileSplite(0, 0, width, height, 'background'); //tiled backgrounf(top-left , bottom-right cord, game object name )
-    ufo = game.add.splite(width - 100, h - 100, 'ufo'); // (x-cord , y-cord, gameobject name given in the preload())
-    bullet = game.add.splite(w - 100, h, 'bullet');
-    player = game.add.splite(50, h, 'player');
+    bg = game.add.tileSprite(0, 0, width, height, 'background'); //tiled backgrounf(top-left , bottom-right cord, game object name )
+    ufo = game.add.sprite(width - 100, height - 100, 'ufo'); // (x-cord , y-cord, gameobject name given in the preload())
+    bullet = game.add.sprite(width - 100, height, 'bullet');
+    player = game.add.sprite(50, height, 'player');
 
     //Setting player objects property'
     game.physics.enable(player);
     player.body.collideWorldBounds = true; //Reason why player doesn't fall off the screen
     var run = player.animations.add('run'); //adds player animation , lopping the spite
-    player.animation.play('run', 10, true); //10 is th fps
+    player.animations.play('run', 10, true); //10 is th fps
 
     // Setting bullet objects property 
     game.physics.enable(bullet); //Adding physics object property, like gravity et to bullet
@@ -80,7 +91,11 @@ function create() {
     pause_label.events.onInputUp.add(pause, self); // adding onClick function ie pause()
     game.input.onDown.add(un_pause, self); // handles menu button clcik based on pointer click (when paused)
 
-    jumpButton = fame.input.keyboard.addKey(Phaser.Keyboard.SPACEBAR); // Adding spacebar to key events
+    jumpButton = game.input.keyboard.addKey(Phaser.Keyboard.SPACEBAR); // Adding spacebar to key events
+
+    // NEURAL NETWORK
+    nn_network = new synaptic.Architect.Perceptron(2, 6, 6, 2);
+    nn_trainer = new synaptic.Trainer(nn_network); // Create trainer
 
     // Sound initializing audio from game assets
     soundJump = game.add.audio('jump');
@@ -88,20 +103,60 @@ function create() {
 
 }
 
+// Neural Network
+function train_nn() {
+
+    nn_trainer.train(trainingdata, {
+        rate: 0.0003,
+        iteration: 10000,
+        shuffle: true
+    });
+}
+
+function get_op_from_trainedData(input_param) {
+
+    //console.log("INPUT",input_param[0]+" "+input_param[1]);
+    nn_output = nn_network.activate(input_param);
+    var on_air = Math.round(nn_output[0] * 100);
+    var on_floor = Math.round(nn_output[1] * 100);
+    console.log("Forecast ", "ON AIR %: " + on_air + " ON FLOOR %: " + on_floor);
+    return nn_output[0] >= nn_output[1];
+}
 
 // UPDATE FUNCTION
 function update() {
-    bg.tilePosiotion.x -= 1; //,=moving background
+    bg.tilePosition.x -= 1; //,=moving background
 
     // collisionHandler function is called when bullet and player collide
-    game.physics.arcade.colide(bullet, player, collisionHandler, null, this);
+    game.physics.arcade.collide(bullet, player, collisionHandler, null, this);
+
+    stay_on_floor = 1;
+    stay_on_air = 0;
+
+    if (!player.body.onFloor()) {
+        stay_on_floor = 0;
+        stay_on_air = 1;
+    }
 
     // Finding the distance between player and the bullet 
     bullet_displacement = Math.floor(player.position.x - bullet.position.x);
 
     // Manual Jump
-    if (jumpButton.isDown && player.body.onFloor()) {
+    if (auto_mode == false &&
+        jumpButton.isDown &&
+        player.body.onFloor()) {
         jump();
+    }
+
+    // Neural Network
+    // Auto Jump
+    if (auto_mode == true &&
+        bullet.position.x > 0 &&
+        player.body.onFloor()) {
+
+        if (get_op_from_trainedData([bullet_displacement, bullet_speed])) {
+            jump();
+        }
     }
 
     // Fires again automatically
@@ -112,6 +167,22 @@ function update() {
     // Reload bullet
     if (bullet.position.x <= 0) {
         reset_state_variables();
+    }
+
+    // Collecting Training Set
+    if (auto_mode == false &&
+        bullet.position.x > 0) {
+
+        trainingData.push({
+            'input': [bullet_displacement, bullet_speed],
+            'output': [stay_on_air, stay_on_floor] // jump now , stay on floor
+        });
+
+        console.log("BULLET DISPLACEMENT, BULLET SPEED, Stay on Air?, Stay on Floor?: ",
+            bullet_displacement + " " + bullet_speed + " " +
+            stay_on_air + " " + stay_on_floor
+        );
+
     }
 }
 
@@ -125,7 +196,7 @@ function getRandomSpeed(min, max) {
 function fire() {
     bullet_speed = -1 * getRandomSpeed(300, 800); // -1 , object should move in the -x direction 
     bullet.body.velocity.y = 0; //bullet is not having vertical motion
-    bullet, body.velocity.x = bullet_speed;
+    bullet.body.velocity.x = bullet_speed;
     bullet_fired = true;
 }
 
@@ -158,8 +229,15 @@ function un_pause(evnet) {
         if (mouse_x > menu_x1 && mouse_x < menu_x2 && mouse_y > menu_y1 && mouse_y < menu_y2) {
             if (mouse_x >= menu_x1 && mouse_x <= menu_x2 && mouse_y >= menu_y1 && mouse_y <= menu_y1 + 90) {
                 // if mouse is clicked on first option
+                training_complete = false;
+                trainingData = [];
                 auto_mode = false;
             } else if (mouse_x >= menu_x1 && mouse_x <= menu_x2 && mouse_y >= menu_y1 + 90 && mouse_y <= menu_y2) {
+                if (!training_complete) {
+                    console.log("", 'Training useing Data set of ' + trainingData.length + "elements");
+                    train_nn();
+                    training_complete = true;
+                }
                 // if mouse is clicked on second option
                 auto_mode = true;
             }
@@ -188,4 +266,8 @@ function reset_state_variables() {
 function jump() {
     soundJump.play();
     player.body.velocity.y = -270; // we give -velocity to y direction for jumping. consider that this velocity(force) is against the gravity
+}
+
+function render() {
+
 }
