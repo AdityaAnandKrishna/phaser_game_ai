@@ -1,2 +1,2 @@
-## phaser_game_ai
-# created using phaser.js and synaptic.js
+# phaser_game_ai
+### reated using phaser.js and synaptic.js
