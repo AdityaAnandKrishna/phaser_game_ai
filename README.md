@@ -2,6 +2,6 @@
 
 #### created using phaser.js and synaptic.js
 
-#screenshot
+# screenshot
 ![](https://github.com/AdityaAnandKrishna/Movie_omdb_api/blob/master/screenshot/Screenshot_Jump.png)
 
